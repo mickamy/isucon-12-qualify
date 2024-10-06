@@ -70,30 +70,59 @@ func connectAdminDB() (*sqlx.DB, error) {
 	return sqlx.Open("mysql", dsn)
 }
 
-// テナントDBのパスを返す
-func tenantDBPath(id int64) string {
-	tenantDBDir := getEnv("ISUCON_TENANT_DB_DIR", "../tenant_db")
-	return filepath.Join(tenantDBDir, fmt.Sprintf("%d.db", id))
+func tenantDBName(id int64) string {
+	return strconv.Itoa(int(id))
 }
 
 // テナントDBに接続する
 func connectToTenantDB(id int64) (*sqlx.DB, error) {
-	p := tenantDBPath(id)
-	db, err := sqlx.Open(sqliteDriverName, fmt.Sprintf("file:%s?mode=rw", p))
-	if err != nil {
-		return nil, fmt.Errorf("failed to open tenant DB: %w", err)
-	}
-	return db, nil
+	p := tenantDBName(id)
+
+	config := mysql.NewConfig()
+	config.Net = "tcp"
+	config.Addr = getEnv("ISUCON_DB_HOST", "127.0.0.1") + ":" + getEnv("ISUCON_DB_PORT", "3306")
+	config.User = getEnv("ISUCON_DB_USER", "isucon")
+	config.Passwd = getEnv("ISUCON_DB_PASSWORD", "isucon")
+	config.DBName = getEnv("ISUCON_DB_NAME", p)
+	config.ParseTime = true
+	dsn := config.FormatDSN()
+	return sqlx.Open("mysql", dsn)
 }
 
 // テナントDBを新規に作成する
 func createTenantDB(id int64) error {
-	p := tenantDBPath(id)
-
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("sqlite3 %s < %s", p, tenantDBSchemaFilePath))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to exec sqlite3 %s < %s, out=%s: %w", p, tenantDBSchemaFilePath, string(out), err)
+	// MySQLに接続
+	db, err := sql.Open("mysql", "isucon:isucon@tcp(localhost:3306)/")
+	if err != nil {
+		return fmt.Errorf("failed to connect to MySQL: %w", err)
 	}
+	defer db.Close()
+
+	// 新しいデータベースを作成
+	dbName := tenantDBName(id)
+	_, err = db.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", dbName))
+	if err != nil {
+		return fmt.Errorf("failed to create database %s: %w", dbName, err)
+	}
+
+	// 新しいデータベースを使用
+	_, err = db.Exec(fmt.Sprintf("USE %s", dbName))
+	if err != nil {
+		return fmt.Errorf("failed to use database %s: %w", dbName, err)
+	}
+
+	// スキーマファイルを読み込む
+	schemaSQL, err := os.ReadFile(tenantDBSchemaFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read schema file: %w", err)
+	}
+
+	// スキーマを実行
+	_, err = db.Exec(string(schemaSQL))
+	if err != nil {
+		return fmt.Errorf("failed to execute schema: %w", err)
+	}
+
 	return nil
 }
 
