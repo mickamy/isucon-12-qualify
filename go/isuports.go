@@ -156,6 +156,7 @@ func Run() {
 	e.Use(SetCacheControlPrivate)
 
 	// SaaS管理者向けAPI
+	e.GET("/api/test", test)
 	e.POST("/api/admin/tenants/add", tenantsAddHandler)
 	e.GET("/api/admin/tenants/billing", tenantsBillingHandler)
 
@@ -440,6 +441,10 @@ func flockByTenantID(tenantID int64) (io.Closer, error) {
 
 type TenantsAddHandlerResult struct {
 	Tenant TenantWithBilling `json:"tenant"`
+}
+
+func test(c echo.Context) error {
+	return c.String(http.StatusOK, "test")
 }
 
 // SasS管理者用API
