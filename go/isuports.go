@@ -70,59 +70,30 @@ func connectAdminDB() (*sqlx.DB, error) {
 	return sqlx.Open("mysql", dsn)
 }
 
-func tenantDBName(id int64) string {
-	return strconv.Itoa(int(id))
+// テナントDBのパスを返す
+func tenantDBPath(id int64) string {
+	tenantDBDir := getEnv("ISUCON_TENANT_DB_DIR", "../tenant_db")
+	return filepath.Join(tenantDBDir, fmt.Sprintf("%d.db", id))
 }
 
 // テナントDBに接続する
 func connectToTenantDB(id int64) (*sqlx.DB, error) {
-	p := tenantDBName(id)
-
-	config := mysql.NewConfig()
-	config.Net = "tcp"
-	config.Addr = getEnv("ISUCON_DB_HOST", "127.0.0.1") + ":" + getEnv("ISUCON_DB_PORT", "3306")
-	config.User = getEnv("ISUCON_DB_USER", "isucon")
-	config.Passwd = getEnv("ISUCON_DB_PASSWORD", "isucon")
-	config.DBName = getEnv("ISUCON_DB_NAME", p)
-	config.ParseTime = true
-	dsn := config.FormatDSN()
-	return sqlx.Open("mysql", dsn)
+	p := tenantDBPath(id)
+	db, err := sqlx.Open(sqliteDriverName, fmt.Sprintf("file:%s?mode=rw", p))
+	if err != nil {
+		return nil, fmt.Errorf("failed to open tenant DB: %w", err)
+	}
+	return db, nil
 }
 
 // テナントDBを新規に作成する
 func createTenantDB(id int64) error {
-	// MySQLに接続
-	db, err := sql.Open("mysql", "isucon:isucon@tcp(localhost:3306)/")
-	if err != nil {
-		return fmt.Errorf("failed to connect to MySQL: %w", err)
-	}
-	defer db.Close()
+	p := tenantDBPath(id)
 
-	// 新しいデータベースを作成
-	dbName := tenantDBName(id)
-	_, err = db.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", dbName))
-	if err != nil {
-		return fmt.Errorf("failed to create database %s: %w", dbName, err)
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("sqlite3 %s < %s", p, tenantDBSchemaFilePath))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to exec sqlite3 %s < %s, out=%s: %w", p, tenantDBSchemaFilePath, string(out), err)
 	}
-
-	// 新しいデータベースを使用
-	_, err = db.Exec(fmt.Sprintf("USE %s", dbName))
-	if err != nil {
-		return fmt.Errorf("failed to use database %s: %w", dbName, err)
-	}
-
-	// スキーマファイルを読み込む
-	schemaSQL, err := os.ReadFile(tenantDBSchemaFilePath)
-	if err != nil {
-		return fmt.Errorf("failed to read schema file: %w", err)
-	}
-
-	// スキーマを実行
-	_, err = db.Exec(string(schemaSQL))
-	if err != nil {
-		return fmt.Errorf("failed to execute schema: %w", err)
-	}
-
 	return nil
 }
 
@@ -167,8 +138,18 @@ func Run() {
 	e.Logger.SetLevel(log.DEBUG)
 
 	var (
-		err error
+		sqlLogger io.Closer
+		err       error
 	)
+	// sqliteのクエリログを出力する設定
+	// 環境変数 ISUCON_SQLITE_TRACE_FILE を設定すると、そのファイルにクエリログをJSON形式で出力する
+	// 未設定なら出力しない
+	// sqltrace.go を参照
+	sqliteDriverName, sqlLogger, err = initializeSQLLogger()
+	if err != nil {
+		e.Logger.Panicf("error initializeSQLLogger: %s", err)
+	}
+	defer sqlLogger.Close()
 
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
