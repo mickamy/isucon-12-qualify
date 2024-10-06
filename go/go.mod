@@ -1,6 +1,8 @@
 module github.com/isucon/isucon12-qualify/webapp/go
 
-go 1.18
+go 1.21.0
+
+toolchain go1.23.1
 
 require (
 	github.com/go-sql-driver/mysql v1.6.0
@@ -11,6 +13,7 @@ require (
 	github.com/lestrrat-go/jwx/v2 v2.0.2
 	github.com/mattn/go-sqlite3 v1.14.13
 	github.com/shogo82148/go-sql-proxy v0.6.1
+	github.com/sugawarayuuta/sonnet v0.0.0-20231004000330-239c7b6e4ce8
 )
 
 require (
